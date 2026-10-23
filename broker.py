@@ -119,7 +119,10 @@ class AlpacaBroker:
 
     def settled_cash(self) -> float:
         """Conservative spendable cash. See module docstring for why this is not
-        literally 'settled' cash: Alpaca has no cash account or settled field."""
+        literally 'settled' cash: Alpaca has no cash account or settled field.
+        Alpaca already subtracts open buy orders from buying power (verified on
+        paper: a $1 limit buy cut it from 300.00 to 298.99), so pending buys
+        are not subtracted again here."""
         acct = self._account()
         if acct.trading_blocked or acct.account_blocked or acct.trade_suspended_by_user:
             return 0.0
