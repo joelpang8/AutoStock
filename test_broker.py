@@ -261,14 +261,14 @@ def test_guardrails_unreadable_equity_blocks_trading(broker, fc):
 
 # --- clock / positions ----------------------------------------------------
 def test_positions(broker, fc):
-    fc.get_all_positions = lambda: [NS(symbol="SPY", market_value="40.5",
-                                       unrealized_plpc="0.012", side="long")]
-    assert broker.positions() == {"SPY": {"usd": 40.5, "pl_pct": pytest.approx(1.2)}}
+    fc.get_all_positions = lambda: [NS(symbol="SPY", market_value="40.5", qty="0.07",
+                                       qty_available="0.07", unrealized_plpc="0.012", side="long")]
+    assert broker.positions() == {"SPY": {"usd": 40.5, "pl_pct": pytest.approx(1.2), "qty": 0.07}}
 
 
 def test_short_position_is_an_error(broker, fc):
-    fc.get_all_positions = lambda: [NS(symbol="SPY", market_value="-40",
-                                       unrealized_plpc="0", side="short")]
+    fc.get_all_positions = lambda: [NS(symbol="SPY", market_value="-40", qty="-1",
+                                       qty_available="-1", unrealized_plpc="0", side="short")]
     with pytest.raises(BrokerDataError):
         broker.positions()
 
@@ -276,3 +276,29 @@ def test_short_position_is_an_error(broker, fc):
 def test_clock(broker, fc):
     fc.get_clock = lambda: NS(is_open=True)
     assert broker.clock().is_open
+
+
+# --- orders ---------------------------------------------------------------
+def test_submit_market_by_dollars(broker, fc):
+    fc.submit_order = lambda req: req
+    req = broker.submit_market("SPY", "buy", "ab-1", usd=15.004)
+    assert (req.notional, req.qty, req.client_order_id, req.side.value) == (15.0, None, "ab-1", "buy")
+    assert req.time_in_force.value == "day"
+
+
+def test_submit_market_needs_exactly_one_amount(broker):
+    with pytest.raises(ValueError):
+        broker.submit_market("SPY", "sell", "ab-1")
+    with pytest.raises(ValueError):
+        broker.submit_market("SPY", "sell", "ab-1", usd=1, qty=1)
+
+
+def test_order_by_client_id_missing_is_none(broker, fc):
+    fc.get_order_by_client_id = lambda c: (_ for _ in ()).throw(api_error(404))
+    assert broker.order_by_client_id("ab-1") is None
+
+
+def test_order_by_client_id_error_raises(broker, fc):
+    fc.get_order_by_client_id = lambda c: (_ for _ in ()).throw(api_error(500))
+    with pytest.raises(BrokerError):
+        broker.order_by_client_id("ab-1")

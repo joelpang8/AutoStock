@@ -29,8 +29,8 @@ import time
 
 from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import AccountStatus, OrderSide, QueryOrderStatus
-from alpaca.trading.requests import GetOrdersRequest
+from alpaca.trading.enums import AccountStatus, OrderSide, QueryOrderStatus, TimeInForce
+from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
 
 log = logging.getLogger(__name__)
 
@@ -170,14 +170,15 @@ class AlpacaBroker:
         return self._call("get_clock", self.client.get_clock)
 
     def positions(self) -> dict[str, dict]:
-        """{symbol: {"usd": market value, "pl_pct": unrealized P/L %}}."""
+        """{symbol: {"usd": market value, "pl_pct": unrealized P/L %, "qty": shares}}."""
         out = {}
         for p in self._call("get_all_positions", self.client.get_all_positions) or []:
             usd = _money(p.market_value, f"{p.symbol} market_value")
             pl = _money(p.unrealized_plpc, f"{p.symbol} unrealized_plpc") if p.unrealized_plpc else 0.0
             if str(getattr(p.side, "value", p.side)) == "short":
                 raise BrokerDataError(f"unexpected short position in {p.symbol}")
-            out[p.symbol] = {"usd": usd, "pl_pct": pl * 100}
+            qty = _money(p.qty_available if p.qty_available is not None else p.qty, f"{p.symbol} qty")
+            out[p.symbol] = {"usd": usd, "pl_pct": pl * 100, "qty": qty}
         return out
 
     def open_orders(self, ticker: str | None = None):
@@ -220,3 +221,35 @@ class AlpacaBroker:
         if acct.trading_blocked or acct.account_blocked or acct.trade_suspended_by_user:
             problems.append("account is blocked or suspended from trading")
         return problems
+
+    # --- orders ------------------------------------------------------------
+    def submit_market(self, ticker: str, side: str, client_order_id: str, *,
+                      usd: float | None = None, qty: float | None = None):
+        """One market DAY order by dollar amount (or share qty, for selling a
+        whole position). Never retried here: on any error the caller must look
+        the order up by client_order_id before deciding it didn't go through."""
+        if (usd is None) == (qty is None):
+            raise ValueError("pass exactly one of usd or qty")
+        req = MarketOrderRequest(
+            symbol=ticker, side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
+            time_in_force=TimeInForce.DAY, client_order_id=client_order_id,
+            notional=round(usd, 2) if usd is not None else None,
+            qty=qty)
+        return self.client.submit_order(req)
+
+    def order_by_client_id(self, client_order_id: str):
+        """The order with this client id, or None if Alpaca has never seen it."""
+        try:
+            return self.client.get_order_by_client_id(client_order_id)
+        except APIError as e:
+            if e.status_code == 404:
+                return None
+            raise BrokerError(f"order lookup {client_order_id} failed: {e}") from e
+        except Exception as e:
+            raise BrokerError(f"order lookup {client_order_id} failed: {e}") from e
+
+    def order(self, order_id):
+        return self._call("get_order", self.client.get_order_by_id, order_id)
+
+    def cancel_order(self, order_id) -> None:
+        self._call("cancel_order", self.client.cancel_order_by_id, order_id)
