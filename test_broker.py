@@ -257,3 +257,22 @@ def test_guardrails_unreadable_equity_blocks_trading(broker, fc):
     fc.acct = account(equity="nan")
     with pytest.raises(BrokerDataError):
         Guardrails(broker).check_order("SPY", "buy", 10)
+
+
+# --- clock / positions ----------------------------------------------------
+def test_positions(broker, fc):
+    fc.get_all_positions = lambda: [NS(symbol="SPY", market_value="40.5",
+                                       unrealized_plpc="0.012", side="long")]
+    assert broker.positions() == {"SPY": {"usd": 40.5, "pl_pct": pytest.approx(1.2)}}
+
+
+def test_short_position_is_an_error(broker, fc):
+    fc.get_all_positions = lambda: [NS(symbol="SPY", market_value="-40",
+                                       unrealized_plpc="0", side="short")]
+    with pytest.raises(BrokerDataError):
+        broker.positions()
+
+
+def test_clock(broker, fc):
+    fc.get_clock = lambda: NS(is_open=True)
+    assert broker.clock().is_open

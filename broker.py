@@ -162,6 +162,21 @@ class AlpacaBroker:
         log.warning("liquidation orders placed for %d positions", len(results))
 
     # --- extras ------------------------------------------------------------
+    def clock(self):
+        """Alpaca market clock: .is_open, .next_open, .next_close, .timestamp."""
+        return self._call("get_clock", self.client.get_clock)
+
+    def positions(self) -> dict[str, dict]:
+        """{symbol: {"usd": market value, "pl_pct": unrealized P/L %}}."""
+        out = {}
+        for p in self._call("get_all_positions", self.client.get_all_positions) or []:
+            usd = _money(p.market_value, f"{p.symbol} market_value")
+            pl = _money(p.unrealized_plpc, f"{p.symbol} unrealized_plpc") if p.unrealized_plpc else 0.0
+            if str(getattr(p.side, "value", p.side)) == "short":
+                raise BrokerDataError(f"unexpected short position in {p.symbol}")
+            out[p.symbol] = {"usd": usd, "pl_pct": pl * 100}
+        return out
+
     def open_orders(self, ticker: str | None = None):
         req = GetOrdersRequest(status=QueryOrderStatus.OPEN,
                                symbols=[ticker] if ticker else None)

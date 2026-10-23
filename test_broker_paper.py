@@ -93,3 +93,14 @@ def test_forced_floor_breach_liquidates_and_halts(broker):
     assert not ok and g.halted, why
     assert wait_for(lambda: not broker.client.get_all_positions(), timeout=60)
     assert not g.check_order("SPY", "buy", 1)[0]  # stays halted
+
+
+def test_market_data_snapshot(broker):
+    from data import MarketClosed, MarketData
+    from guardrails import Limits
+    try:
+        snap = MarketData.from_env().snapshot(broker, Limits().allowed_tickers)
+    except MarketClosed:
+        pytest.skip("market closed")
+    print("\n" + snap.to_prompt())
+    assert snap.tickers, snap.excluded
