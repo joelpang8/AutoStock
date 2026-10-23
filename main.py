@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from broker import AlpacaBroker
+from context import ContextProvider
 from data import MarketData
 from decision import Decider
 from engine import Engine
@@ -39,7 +40,7 @@ def main():
         log.warning("ALERT [%s] %s", kind, msg)
 
     guardrails = Guardrails(broker)
-    engine = Engine(broker, MarketData.from_env(), Decider.from_env(), guardrails,
+    engine = Engine(broker, MarketData.from_env(context=ContextProvider.from_env()), Decider.from_env(), guardrails,
                     StateStore(os.getenv("STATE_PATH", "state.json")), guardrails.limits.allowed_tickers,
                     interval_min=int(os.getenv("DECISION_INTERVAL_MINUTES", "5")),
                     notify=notify, record=record)

@@ -143,6 +143,8 @@ class Engine:
             return self._event("hold", why=str(e))
         if snap.excluded:
             log.info("excluded this cycle: %s", snap.excluded)
+        for problem in snap.context_problems:
+            self._alert("error", f"deciding without full context: {problem}")
 
         cid = self.client_id(self.slot(snap.as_of))
         if self.broker.order_by_client_id(cid) is not None:

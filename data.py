@@ -56,6 +56,8 @@ class Snapshot:
     positions: dict           # {symbol: {"usd": float, "pl_pct": float}}
     tickers: dict             # {symbol: TickerView}
     excluded: dict = field(default_factory=dict)  # {symbol: reason}
+    context: str = ""                              # history / earnings / news section
+    context_problems: tuple = ()                   # parts of the context that failed
 
     def to_prompt(self) -> str:
         """Short, fixed-format text for the decision step."""
@@ -78,6 +80,8 @@ class Snapshot:
                          f"{_pct(v.chg_1h_pct)} {_pct(v.chg_5d_pct)}")
         if self.excluded:
             lines.append("not tradable now: " + ", ".join(sorted(self.excluded)))
+        if self.context:
+            lines.append(self.context)
         return "\n".join(lines)
 
 
@@ -102,9 +106,10 @@ def _change(now: float, then) -> float | None:
 class MarketData:
     def __init__(self, client: StockHistoricalDataClient, *,
                  max_quote_age: timedelta = timedelta(minutes=2),
-                 max_spread_pct: float = 0.5,
+                 max_spread_pct: float = 0.5, context=None,
                  now=lambda: datetime.now(timezone.utc)):
         self.client = client
+        self.context = context   # optional ContextProvider (history, earnings, news)
         self.max_quote_age = max_quote_age
         self.max_spread_pct = max_spread_pct
         self.now = now
@@ -139,7 +144,12 @@ class MarketData:
                 excluded[s] = why
         if not views:
             raise StaleDataError("no usable quotes: " + "; ".join(f"{s}: {w}" for s, w in excluded.items()))
-        return Snapshot(now, clock.next_close, equity, cash, positions, views, excluded)
+        ctx, problems = "", ()
+        if self.context is not None:
+            ctx = self.context.text({s: v.price for s, v in views.items()})
+            problems = tuple(self.context.problems)
+        return Snapshot(now, clock.next_close, equity, cash, positions, views, excluded,
+                        ctx, problems)
 
     def _bars(self, tickers, timeframe, start) -> dict:
         bs = self.client.get_stock_bars(StockBarsRequest(
