@@ -7,6 +7,9 @@
   few per ticker from the last 24 hours. Headlines are third-party text: they
   are cleaned, truncated and labelled as data, never as instructions. The
   guardrails bound what any decision can do regardless.
+- Setups: chart setup tags per ticker (setups.py, after the Day Trader skill's
+  scanner): daily-close rules on the history above, plus today's opening
+  range from 5-minute IEX bars fetched each cycle.
 - Earnings: next report date per stock from Alpha Vantage's earnings calendar,
   fetched once per day (one request; the free key allows 25/day). Optional:
   without ALPHAVANTAGE_API_KEY the prompt says earnings dates are unavailable.
@@ -33,9 +36,10 @@ from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.historical.news import NewsClient
 from alpaca.data.requests import NewsRequest, StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from data import ET
+from setups import setup_lines
 
 log = logging.getLogger(__name__)
 
@@ -136,6 +140,14 @@ class ContextProvider:
             vol = "n/a"
         return f"{ret(21)} {ret(63)} {ret(252)} {vs_ma(50)} {vs_ma(200)} {off_hi} {vol}"
 
+    def _intraday(self, tickers) -> dict:
+        """Today's 5-minute bars from the open (one request per cycle)."""
+        open_ = datetime.combine(self._today(), datetime.min.time(), tzinfo=ET).replace(hour=9, minute=30)
+        bs = self.bars.get_stock_bars(StockBarsRequest(
+            symbol_or_symbols=sorted(tickers), timeframe=TimeFrame(5, TimeFrameUnit.Minute),
+            start=open_, feed=DataFeed.IEX))
+        return getattr(bs, "data", bs) or {}
+
     # --- news ------------------------------------------------------------
     def headlines(self, tickers) -> dict:
         ns = self.news_client.get_news(NewsRequest(
@@ -192,6 +204,18 @@ class ContextProvider:
         except Exception as e:
             self.problems.append(f"history unavailable: {e}")
             lines.append("history: unavailable this cycle")
+            closes = None
+
+        if closes is not None:
+            try:
+                bars = self._intraday(tickers)
+            except Exception as e:
+                self.problems.append(f"intraday bars unavailable: {e}")
+                bars = None
+            lines.append("chart setups (rules on daily closes through the last session, and today's "
+                         "9:30-9:45 opening range on IEX 5-min bars; a matched rule is not a "
+                         "prediction):")
+            lines += setup_lines({t: closes.get(t, []) for t in tickers}, bars, self.now())
 
         if self.earnings is None:
             lines.append("earnings dates: not available")
