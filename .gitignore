@@ -8,3 +8,6 @@ state.json
 .state-*
 bot.log
 events.jsonl
+*.db-wal
+*.db-shm
+state.json.imported

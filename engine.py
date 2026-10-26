@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from broker import BrokerError
 from data import MarketClosed, StaleDataError
 from decision import DecisionUnavailable
-from state import BotState, StateStore
+from state import BotState
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def _status(order) -> str:
 
 
 class Engine:
-    def __init__(self, broker, data, decider, guardrails, store: StateStore, tickers, *,
+    def __init__(self, broker, data, decider, guardrails, store, tickers, *,
                  interval_min: int = 5, notify=lambda kind, msg: None, record=lambda event: None,
                  now=lambda: datetime.now(timezone.utc), sleep=time.sleep,
                  fill_timeout_s: float = 30, stuck_order_min: float = 10):

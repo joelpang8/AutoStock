@@ -61,6 +61,15 @@ class CheckIn:
         except Exception:
             log.exception("check-in could not record event")
 
+    def replay(self, events):
+        """Rebuild today's counts after a restart, from the stored events."""
+        for e in events:
+            self.record(e)
+
+    def day_start_utc(self) -> str:
+        start = datetime.combine(self._et_date(), time(0), tzinfo=ET)
+        return start.astimezone(timezone.utc).isoformat()
+
     def _roll_day(self):
         today = self._et_date()
         if today != self.day:

@@ -204,3 +204,14 @@ def test_bot_refuses_strangers(bot, parts):
 def test_bot_runs_owner_command(bot, parts):
     assert "Paused" in run(bot, "pause", OWNER)[0]
     assert parts.store.load().paused
+
+
+def test_today_counts_survive_restart_via_stored_events(parts):
+    e, c = wire(parts)
+    db = parts.store.db
+    e.record = lambda ev: (db.record(ev), c.record(ev))
+    e.run_cycle()
+    _, c2 = wire(parts)   # restart: fresh CheckIn, same database
+    c2.replay(db.events_since(c2.day_start_utc()))
+    assert "1 buys" in c2._today_line() and c2.trades == ["BUY QQQ $15.00 @ 100.05"]
+    assert c2.last_decision[1]["reason"] == "test buy"
