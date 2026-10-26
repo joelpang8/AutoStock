@@ -63,30 +63,49 @@ def daily_setups(closes) -> tuple[list[str], float | None]:
     return tags, r
 
 
-def opening_range(bars, now: datetime) -> str:
-    """bars: today's 5-minute bars (objects with timestamp=bar start, high, low,
-    close). Returns a short phrase for the prompt."""
-    day = now.astimezone(ET).date()
+def range_state(bars, day, now: datetime):
+    """The opening range of one session from its 5-minute bars (objects with
+    timestamp=bar start, high, low, close), using only bars complete by `now`.
+    None when a range bar is missing. Otherwise a dict: hi, lo, first =
+    (side "above"/"below", close, close time ET) of the first completed bar to
+    close outside the range or None, and last_close of the last completed bar
+    before 4:00 PM."""
     open_ = datetime.combine(day, time(9, 30), tzinfo=ET)
+    close = datetime.combine(day, time(16, 0), tzinfo=ET)
+    # regular session only: Alpaca's bars include pre-market and after-hours trading
     done = sorted((b for b in bars
-                   if b.timestamp.astimezone(ET).date() == day and b.timestamp + BAR <= now),
+                   if open_ <= b.timestamp < close and b.timestamp + BAR <= now),
                   key=lambda b: b.timestamp)
-    rng = [b for b in done if b.timestamp.astimezone(ET) < open_ + RANGE_BARS * BAR]
-    starts = {b.timestamp.astimezone(ET) for b in rng}
-    if starts != {open_ + k * BAR for k in range(RANGE_BARS)}:
-        return "opening range n/a" if now >= open_ + RANGE_BARS * BAR else "opening range forming"
+    rng = [b for b in done if b.timestamp < open_ + RANGE_BARS * BAR]
+    if {b.timestamp.astimezone(ET) for b in rng} != {open_ + k * BAR for k in range(RANGE_BARS)}:
+        return None
     hi, lo = max(float(b.high) for b in rng), min(float(b.low) for b in rng)
-    text = f"opening range {lo:.2f}-{hi:.2f}"
-    after = done[len(rng):]
-    for b in after:
-        c, at = float(b.close), (b.timestamp + BAR).astimezone(ET)
+    first = None
+    for b in done[len(rng):]:
+        c = float(b.close)
         if c > hi or c < lo:
-            side, ref = ("above", hi) if c > hi else ("below", lo)
-            text += f": first close {side} it {at:%H:%M} ({(c / ref - 1) * 100:+.2f}%)"
-            last = float(after[-1].close)
-            now_side = "above" if last > hi else "below" if last < lo else "inside"
-            return f"{text}, last 5-min close {now_side} it"
-    return f"{text}: no close outside it yet"
+            first = ("above" if c > hi else "below", c, (b.timestamp + BAR).astimezone(ET))
+            break
+    return {"hi": hi, "lo": lo, "first": first, "last_close": float(done[-1].close)}
+
+
+def opening_range(bars, now: datetime) -> str:
+    """Today's opening range as a short phrase for the prompt."""
+    day = now.astimezone(ET).date()
+    st = range_state(bars, day, now)
+    if st is None:
+        ready = datetime.combine(day, time(9, 30), tzinfo=ET) + RANGE_BARS * BAR
+        return "opening range n/a" if now >= ready else "opening range forming"
+    hi, lo = st["hi"], st["lo"]
+    text = f"opening range {lo:.2f}-{hi:.2f}"
+    if st["first"] is None:
+        return f"{text}: no close outside it yet"
+    side, c, at = st["first"]
+    ref = hi if side == "above" else lo
+    last = st["last_close"]
+    now_side = "above" if last > hi else "below" if last < lo else "inside"
+    return (f"{text}: first close {side} it {at:%H:%M} ({(c / ref - 1) * 100:+.2f}%), "
+            f"last 5-min close {now_side} it")
 
 
 def setup_lines(closes_by_ticker: dict, bars_by_ticker: dict | None, now: datetime) -> list[str]:

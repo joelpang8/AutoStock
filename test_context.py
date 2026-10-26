@@ -195,3 +195,13 @@ def test_intraday_failure_keeps_daily_tags_and_reports_problem():
     section = text.split("chart setups")[1]
     assert "\nSPY breakout_20d; rsi14" in section and "opening range" not in section.split("\n", 1)[1]
     assert any("intraday" in x for x in p.problems)
+
+
+def test_odds_section_and_orb_history_fetched_once_a_day():
+    fb = FakeBars({"SPY": bars([100.0] * 39 + [101.0])})
+    p = provider(fb)
+    text = p.text({"SPY": 100.0})
+    assert "historical odds" in text and "SPY breakout_20d: never fired before in the past year" in text
+    p.text({"SPY": 100.0})
+    # no opening-range break today in the fake data -> the 60-day history is never fetched
+    assert fb.intraday_calls == 2
