@@ -17,10 +17,10 @@ Build a bot that trades US stocks by itself, all the time, using Claude (via the
 3. **Guardrail layer (`guardrails.py`, already written and tested):** every proposed order must pass `Guardrails.check_order()` before it reaches the broker. This is plain code and the AI must not be able to bypass or modify it.
 4. **Execution engine:** place orders by dollar amount, confirm fills, handle API errors and disconnects, never double-submit after a restart, and log everything.
 5. **Check-in channel:** a Telegram or Discord bot with commands `status`, `pause`, `resume`, `halt`. It pushes an alert for every trade, every error, and a daily summary of equity and decisions.
-6. **Deployment:** Docker on a small cloud server with auto-restart, a heartbeat alert if the bot goes silent, and the bot idle outside market hours.
+6. **Deployment:** a systemd service on a small cloud server with auto-restart, a heartbeat alert if the bot goes silent, and the bot idle outside market hours (owner chose systemd over Docker; see DEPLOY.md).
 7. **Storage:** SQLite for trades, decisions with reasoning, and state.
 
-Stack: Python, `alpaca-py`, the Anthropic SDK, SQLite, Docker.
+Stack: Python, `alpaca-py`, the Anthropic SDK, SQLite, systemd.
 
 ## Existing files
 - `guardrails.py`: floor kill-switch ($200), per-trade cap ($20), per-ticker cap ($60), 12 orders per hour, allowed-ticker list, settled-cash check. Expects a broker object with `equity()`, `settled_cash()`, `position_value(ticker)`, `cancel_all_orders()`, `close_all_positions()`.
@@ -33,7 +33,7 @@ Stack: Python, `alpaca-py`, the Anthropic SDK, SQLite, Docker.
 4. Execution engine wired through the guardrails.
 5. SQLite logging.
 6. Check-in bot.
-7. Docker and deployment.
+7. Deployment (systemd, DEPLOY.md).
 8. Only then, a live run, after asking the owner (see rules below).
 
 ## Things to verify, not assume

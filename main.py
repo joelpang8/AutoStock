@@ -67,11 +67,18 @@ def main():
         if checkin:
             checkin.record(event)
 
+    heartbeat = lambda: None
+    if os.getenv("HEALTHCHECK_URL"):
+        from heartbeat import Heartbeat
+        heartbeat = Heartbeat(os.environ["HEALTHCHECK_URL"]).ping
+    else:
+        log.warning("no HEALTHCHECK_URL: nobody will notice if the bot goes silent")
+
     guardrails = Guardrails(broker)
     engine = Engine(broker, MarketData.from_env(context=ContextProvider.from_env()), Decider.from_env(), guardrails,
                     store, guardrails.limits.allowed_tickers,
                     interval_min=int(os.getenv("DECISION_INTERVAL_MINUTES", "5")),
-                    notify=notify, record=record)
+                    notify=notify, record=record, heartbeat=heartbeat)
     checkin = CheckIn(engine, broker, int(discord_cfg[3] or 0))
     checkin.replay(db.events_since(checkin.day_start_utc()))
     log.info("starting (%s)", "paper" if broker.paper else "LIVE")

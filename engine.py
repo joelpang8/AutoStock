@@ -40,11 +40,13 @@ def _status(order) -> str:
 class Engine:
     def __init__(self, broker, data, decider, guardrails, store, tickers, *,
                  interval_min: int = 5, notify=lambda kind, msg: None, record=lambda event: None,
+                 heartbeat=lambda: None,
                  now=lambda: datetime.now(timezone.utc), sleep=time.sleep,
                  fill_timeout_s: float = 30, stuck_order_min: float = 10):
         self.broker, self.data, self.decider, self.g = broker, data, decider, guardrails
         self.store, self.tickers, self.interval = store, sorted(tickers), interval_min
         self.notify, self.record, self.now, self.sleep = notify, record, now, sleep
+        self.heartbeat = heartbeat   # called after every cycle: "the loop is alive"
         self.fill_timeout_s, self.stuck_order_min = fill_timeout_s, stuck_order_min
         self._last_alert: dict = {}
         # owner commands arrive from the check-in bot's thread: they wait for a running cycle
@@ -265,6 +267,7 @@ class Engine:
         self._alert("status", "bot started" + (" (HALTED)" if self.g.halted else ""), dedupe_min=0)
         while True:
             ev = self.run_cycle()
+            self.heartbeat()
             t = self.now()
             nxt = self.slot(t) + timedelta(minutes=self.interval, seconds=5)
             if ev.get("kind") == "idle":
