@@ -7,6 +7,9 @@
   few per ticker from the last 24 hours. Headlines are third-party text: they
   are cleaned, truncated and labelled as data, never as instructions. The
   guardrails bound what any decision can do regardless.
+- Setups: chart setup tags per ticker (setups.py, after the Day Trader skill's
+  scanner): daily-close rules on the history above, plus today's opening
+  range from 5-minute IEX bars fetched each cycle.
 - Earnings: next report date per stock from Alpha Vantage's earnings calendar,
   fetched once per day (one request; the free key allows 25/day). Optional:
   without ALPHAVANTAGE_API_KEY the prompt says earnings dates are unavailable.
@@ -33,9 +36,11 @@ from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.historical.news import NewsClient
 from alpaca.data.requests import NewsRequest, StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from data import ET
+from odds import odds_lines, orb_odds
+from setups import range_state, setup_lines
 
 log = logging.getLogger(__name__)
 
@@ -94,6 +99,8 @@ class ContextProvider:
         self._history = _DailyCache()
         self._earnings = _DailyCache()
         self._earnings_failed_at: datetime | None = None
+        self._orb = _DailyCache()
+        self._orb_failed_at: datetime | None = None
         self.problems: list[str] = []   # what was unavailable in the last text() call
 
     @classmethod
@@ -135,6 +142,36 @@ class ContextProvider:
         else:
             vol = "n/a"
         return f"{ret(21)} {ret(63)} {ret(252)} {vs_ma(50)} {vs_ma(200)} {off_hi} {vol}"
+
+    def _intraday(self, tickers) -> dict:
+        """Today's 5-minute bars from the open (one request per cycle)."""
+        open_ = datetime.combine(self._today(), datetime.min.time(), tzinfo=ET).replace(hour=9, minute=30)
+        bs = self.bars.get_stock_bars(StockBarsRequest(
+            symbol_or_symbols=sorted(tickers), timeframe=TimeFrame(5, TimeFrameUnit.Minute),
+            start=open_, feed=DataFeed.IEX))
+        return getattr(bs, "data", bs) or {}
+
+    def _orb_history(self, tickers) -> dict:
+        """{ticker: orb_odds(...)} from ~60 past sessions of 5-minute bars. Fetched
+        once a day (it's the biggest request the bot makes); after a failure,
+        retried at most hourly."""
+        if self._orb.day == self._today():
+            return self._orb.value
+        if self._orb_failed_at and self.now() - self._orb_failed_at < timedelta(hours=1):
+            raise RuntimeError("opening-range history fetch failed recently; retrying hourly")
+        today_start = datetime.combine(self._today(), datetime.min.time(), tzinfo=ET)
+        try:
+            bs = self.bars.get_stock_bars(StockBarsRequest(
+                symbol_or_symbols=sorted(tickers), timeframe=TimeFrame(5, TimeFrameUnit.Minute),
+                start=today_start - timedelta(days=90), end=today_start, feed=DataFeed.IEX))
+            data = getattr(bs, "data", bs) or {}
+            value = {s: orb_odds(data.get(s, [])) for s in tickers}
+        except Exception:
+            self._orb_failed_at = self.now()
+            raise
+        self._orb_failed_at = None
+        self._orb = _DailyCache(self._today(), value)
+        return value
 
     # --- news ------------------------------------------------------------
     def headlines(self, tickers) -> dict:
@@ -192,6 +229,34 @@ class ContextProvider:
         except Exception as e:
             self.problems.append(f"history unavailable: {e}")
             lines.append("history: unavailable this cycle")
+            closes = None
+
+        if closes is not None:
+            try:
+                bars = self._intraday(tickers)
+            except Exception as e:
+                self.problems.append(f"intraday bars unavailable: {e}")
+                bars = None
+            lines.append("chart setups (rules on daily closes through the last session, and today's "
+                         "9:30-9:45 opening range on IEX 5-min bars; a matched rule is not a "
+                         "prediction):")
+            by_ticker = {t: closes.get(t, []) for t in tickers}
+            lines += setup_lines(by_ticker, bars, self.now())
+
+            today_side = {}
+            for t in tickers:
+                st = range_state((bars or {}).get(t, []), self._today(), self.now())
+                if st and st["first"]:
+                    today_side[t] = st["first"][0]
+            try:
+                orb = self._orb_history(tickers) if today_side else None
+            except Exception as e:
+                self.problems.append(f"opening-range history unavailable: {e}")
+                orb = None
+            odds = odds_lines(by_ticker, orb, today_side)
+            lines.append("historical odds for the setups active now (this ticker's own past; "
+                         "small samples, not a prediction; returns before spread costs):")
+            lines += odds or ["- no setup active now"]
 
         if self.earnings is None:
             lines.append("earnings dates: not available")

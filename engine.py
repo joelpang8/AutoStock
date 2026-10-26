@@ -18,13 +18,14 @@ one, and a failed submit is looked up by id before anything else happens.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
 from broker import BrokerError
 from data import MarketClosed, StaleDataError
 from decision import DecisionUnavailable
-from state import BotState, StateStore
+from state import BotState
 
 log = logging.getLogger(__name__)
 
@@ -37,15 +38,19 @@ def _status(order) -> str:
 
 
 class Engine:
-    def __init__(self, broker, data, decider, guardrails, store: StateStore, tickers, *,
+    def __init__(self, broker, data, decider, guardrails, store, tickers, *,
                  interval_min: int = 5, notify=lambda kind, msg: None, record=lambda event: None,
+                 heartbeat=lambda: None,
                  now=lambda: datetime.now(timezone.utc), sleep=time.sleep,
                  fill_timeout_s: float = 30, stuck_order_min: float = 10):
         self.broker, self.data, self.decider, self.g = broker, data, decider, guardrails
         self.store, self.tickers, self.interval = store, sorted(tickers), interval_min
         self.notify, self.record, self.now, self.sleep = notify, record, now, sleep
+        self.heartbeat = heartbeat   # called after every cycle: "the loop is alive"
         self.fill_timeout_s, self.stuck_order_min = fill_timeout_s, stuck_order_min
         self._last_alert: dict = {}
+        # owner commands arrive from the check-in bot's thread: they wait for a running cycle
+        self.lock = threading.RLock()
 
         self.state: BotState = store.load()
         # restore what guardrails.py keeps in memory, so a restart can't reset it
@@ -82,25 +87,33 @@ class Engine:
         self.state.ai_spend = {d.isoformat(): v for d, v in self.decider.budget.spent.items()}
         self.store.save(self.state)
 
-    # --- owner commands (wired to the check-in bot in step 6) ---------------
+    # --- owner commands (from the check-in bot, see checkin.py) -------------
     def pause(self):
-        self.state.paused = True
-        self._save()
+        with self.lock:
+            self.state.paused = True
+            self._save()
 
     def resume(self):
         """Clears pause and halt. The only way out of a floor halt."""
-        self.state.paused = False
-        self.g.resume()
-        self._save()
+        with self.lock:
+            self.state.paused = False
+            self.g.resume()
+            self._save()
 
     def halt(self, reason: str):
-        try:
-            self.g.halt(reason)
-        finally:
-            self._save()
+        """Cancels open orders, sells everything, and stays halted until resume()."""
+        with self.lock:
+            try:
+                self.g.halt(reason)
+            finally:
+                self._save()
 
     # --- one cycle -----------------------------------------------------------
     def run_cycle(self) -> dict:
+        with self.lock:
+            return self._locked_cycle()
+
+    def _locked_cycle(self) -> dict:
         try:
             return self._cycle()
         except Exception as e:  # never crash the loop on one bad cycle
@@ -254,6 +267,7 @@ class Engine:
         self._alert("status", "bot started" + (" (HALTED)" if self.g.halted else ""), dedupe_min=0)
         while True:
             ev = self.run_cycle()
+            self.heartbeat()
             t = self.now()
             nxt = self.slot(t) + timedelta(minutes=self.interval, seconds=5)
             if ev.get("kind") == "idle":

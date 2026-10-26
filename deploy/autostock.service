@@ -1,0 +1,28 @@
+# systemd service for the trading bot. Installed by deploy/install.sh.
+# Starts at boot, restarts 10 s after any crash or exit, forever.
+[Unit]
+Description=AutoStock trading bot
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=autostock
+Group=autostock
+WorkingDirectory=/opt/autostock/app
+# .env (keys, Discord ids, HEALTHCHECK_URL) is read by the bot from this folder
+ExecStart=/opt/autostock/venv/bin/python -u main.py
+Restart=always
+RestartSec=10
+# a halt or liquidation in progress gets time to finish its current call
+TimeoutStopSec=60
+# hardening: the bot only needs its own folder and the network
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/autostock/app
+
+[Install]
+WantedBy=multi-user.target

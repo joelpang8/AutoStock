@@ -2,3 +2,4 @@ alpaca-py==0.44.0
 anthropic==2.1.0
 python-dotenv
 pytest
+discord.py==2.7.1

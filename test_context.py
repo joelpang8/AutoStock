@@ -17,13 +17,20 @@ def bars(closes, end_days_ago=1):
 
 
 class FakeBars:
-    def __init__(self, data=None, exc=None):
+    """calls counts daily-history requests; intraday (5-minute) ones are counted apart."""
+    def __init__(self, data=None, exc=None, intraday=None):
         self.data, self.exc, self.calls = data or {}, exc, 0
+        self.intraday, self.intraday_calls = intraday or {}, 0
     def get_stock_bars(self, req):
+        assert req.feed.value == "iex"
+        if req.timeframe.amount_value == 5:
+            self.intraday_calls += 1
+            if self.exc:
+                raise self.exc
+            return NS(data=self.intraday)
         self.calls += 1
         if self.exc:
             raise self.exc
-        assert req.feed.value == "iex"
         return NS(data=self.data)
 
 
@@ -166,3 +173,35 @@ def test_context_reaches_prompt_and_problems_reach_snapshot():
     s = MarketData(FakeData({"SPY": snap()}), context=ctx, now=lambda: NOW).snapshot(FakeBroker(), ["SPY"])
     assert "history (% unless noted)" in s.to_prompt()
     assert any("news unavailable" in p for p in s.context_problems)
+
+
+# --- chart setups ------------------------------------------------------------------
+def test_setup_section_in_context():
+    fb = FakeBars({"SPY": bars([100.0] * 39 + [101.0]), "QQQ": bars([100.0] * 40)})
+    text = provider(fb).text({"SPY": 100.0, "QQQ": 100.0})
+    section = text.split("chart setups")[1]
+    assert "\nQQQ no daily setup" in section and "\nSPY breakout_20d" in section
+    assert fb.intraday_calls == 1
+
+
+def test_intraday_failure_keeps_daily_tags_and_reports_problem():
+    class HalfBroken(FakeBars):
+        def get_stock_bars(self, req):
+            if req.timeframe.amount_value == 5:
+                raise RuntimeError("iex down")
+            return super().get_stock_bars(req)
+    p = provider(HalfBroken({"SPY": bars([100.0] * 39 + [101.0])}))
+    text = p.text({"SPY": 100.0})
+    section = text.split("chart setups")[1]
+    assert "\nSPY breakout_20d; rsi14" in section and "opening range" not in section.split("\n", 1)[1]
+    assert any("intraday" in x for x in p.problems)
+
+
+def test_odds_section_and_orb_history_fetched_once_a_day():
+    fb = FakeBars({"SPY": bars([100.0] * 39 + [101.0])})
+    p = provider(fb)
+    text = p.text({"SPY": 100.0})
+    assert "historical odds" in text and "SPY breakout_20d: never fired before in the past year" in text
+    p.text({"SPY": 100.0})
+    # no opening-range break today in the fake data -> the 60-day history is never fetched
+    assert fb.intraday_calls == 2

@@ -9,7 +9,8 @@ from data import MarketClosed, Snapshot, StaleDataError, TickerView
 from decision import (BudgetExhausted, DailyBudget, Decision, DecisionResult)
 from engine import Engine
 from guardrails import Guardrails
-from state import BotState, StateError, StateStore
+from state import BotState, StateError
+from storage import Database, SqliteStateStore
 
 NOW = datetime(2026, 10, 22, 15, 7, 30, tzinfo=timezone.utc)   # slot 15:05
 
@@ -93,7 +94,7 @@ class FakeDecider:
 def parts(tmp_path):
     b = FakeBroker()
     return NS(broker=b, data=FakeData(), decider=FakeDecider(), alerts=[], events=[],
-              store=StateStore(str(tmp_path / "state.json")))
+              store=SqliteStateStore(Database(str(tmp_path / "bot.db"))))
 
 
 def make(p):
@@ -282,10 +283,9 @@ def test_ai_spend_survives_restart(parts):
     assert e2.decider.budget.spent
 
 
-# --- state file ----------------------------------------------------------------------------
-def test_corrupt_state_file_refuses_to_start(parts):
-    with open(parts.store.path, "w") as f:
-        f.write("{not json")
+# --- stored state ----------------------------------------------------------------------------
+def test_corrupt_state_refuses_to_start(parts):
+    parts.store.db._write("INSERT INTO state (id, data, updated) VALUES (1, '{not json', '')")
     with pytest.raises(StateError):
         make(parts)
 
