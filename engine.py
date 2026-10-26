@@ -18,6 +18,7 @@ one, and a failed submit is looked up by id before anything else happens.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -46,6 +47,8 @@ class Engine:
         self.notify, self.record, self.now, self.sleep = notify, record, now, sleep
         self.fill_timeout_s, self.stuck_order_min = fill_timeout_s, stuck_order_min
         self._last_alert: dict = {}
+        # owner commands arrive from the check-in bot's thread: they wait for a running cycle
+        self.lock = threading.RLock()
 
         self.state: BotState = store.load()
         # restore what guardrails.py keeps in memory, so a restart can't reset it
@@ -82,25 +85,33 @@ class Engine:
         self.state.ai_spend = {d.isoformat(): v for d, v in self.decider.budget.spent.items()}
         self.store.save(self.state)
 
-    # --- owner commands (wired to the check-in bot in step 6) ---------------
+    # --- owner commands (from the check-in bot, see checkin.py) -------------
     def pause(self):
-        self.state.paused = True
-        self._save()
+        with self.lock:
+            self.state.paused = True
+            self._save()
 
     def resume(self):
         """Clears pause and halt. The only way out of a floor halt."""
-        self.state.paused = False
-        self.g.resume()
-        self._save()
+        with self.lock:
+            self.state.paused = False
+            self.g.resume()
+            self._save()
 
     def halt(self, reason: str):
-        try:
-            self.g.halt(reason)
-        finally:
-            self._save()
+        """Cancels open orders, sells everything, and stays halted until resume()."""
+        with self.lock:
+            try:
+                self.g.halt(reason)
+            finally:
+                self._save()
 
     # --- one cycle -----------------------------------------------------------
     def run_cycle(self) -> dict:
+        with self.lock:
+            return self._locked_cycle()
+
+    def _locked_cycle(self) -> dict:
         try:
             return self._cycle()
         except Exception as e:  # never crash the loop on one bad cycle
