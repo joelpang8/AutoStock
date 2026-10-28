@@ -11,3 +11,4 @@ events.jsonl
 *.db-wal
 *.db-shm
 state.json.imported
+backtest_results/
