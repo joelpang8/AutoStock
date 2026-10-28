@@ -205,3 +205,33 @@ def test_odds_section_and_orb_history_fetched_once_a_day():
     p.text({"SPY": 100.0})
     # no opening-range break today in the fake data -> the 60-day history is never fetched
     assert fb.intraday_calls == 2
+
+
+# --- earnings soon ------------------------------------------------------------------
+from context import earnings_soon  # noqa: E402
+
+TODAY = date(2026, 10, 27)
+
+
+def test_earnings_soon_names_today_tomorrow_and_days():
+    dates = {"GOOGL": (date(2026, 10, 28), "post-market"), "AMZN": (date(2026, 10, 29), ""),
+             "MSFT": (date(2026, 10, 27), "post-market"), "AAPL": (date(2026, 11, 2), "post-market")}
+    line = earnings_soon(dates, TODAY)
+    assert line.startswith("EARNINGS SOON (next 3 days")
+    assert line.endswith("MSFT today after the close; GOOGL tomorrow after the close; AMZN in 2 days")
+    assert "AAPL" not in line
+
+
+def test_earnings_soon_premarket_today_is_already_out():
+    assert "NVDA today before the open (already out)" in earnings_soon(
+        {"NVDA": (TODAY, "pre-market")}, TODAY)
+
+
+def test_earnings_soon_none():
+    assert earnings_soon({"AAPL": (date(2026, 11, 20), "")}, TODAY) == \
+        "EARNINGS SOON: none of these stocks reports in the next 3 days"
+
+
+def test_earnings_soon_line_is_in_the_prompt():
+    p = provider(earnings=EarningsCalendar("k", fetch=lambda: CSV))
+    assert "EARNINGS SOON: none" in p.text({"AAPL": 1.0})   # AAPL is 7 days out
