@@ -26,6 +26,9 @@ Simulation, not a broker:
 - The model may have seen some of this period in training; it can't see the
   future of the replay itself, but treat the result as a rough check, not proof.
 
+A checkpoint is saved in the output folder after every session; running the
+same command again resumes after the last finished one.
+
 Costs real Claude calls: about $0.0004 each, so 20 days x 25 times x 2
 variants is about $0.40. Places no orders anywhere.
 """
@@ -365,8 +368,15 @@ def run(days: int, every: int, out: Path, tickers=None):
 
     curve = []   # (date, {variant: equity}, spy_close)
     spy_shares = None
+    ckpt = out / "checkpoint.json"
+    done = set()
+    if ckpt.exists():
+        spy_shares, curve, done = load_checkpoint(ckpt, variants, prices, replay, every)
+        log.info("resuming after %s (%d sessions already done)", max(done), len(done))
     with ThreadPoolExecutor(len(variants)) as pool:
         for day in replay:
+            if day in done:
+                continue
             t = datetime.combine(day, time(9, 30), tzinfo=ET) + timedelta(minutes=15)
             close = datetime.combine(day, time(16, 0), tzinfo=ET)
             while t < close:
@@ -396,8 +406,44 @@ def run(days: int, every: int, out: Path, tickers=None):
             log.info("%s  %s  SPY hold $%.2f", day,
                      "  ".join(f"{v.name} ${v.account.equity():.2f}" for v in variants),
                      spy_shares * last["SPY"])
+            save_checkpoint(ckpt, variants, prices, spy_shares, curve, replay, every)
 
     report(variants, curve, spy_shares, replay, every, out)
+
+
+# --- checkpoint: a restart resumes after the last finished session -------------------
+def save_checkpoint(path: Path, variants, prices, spy_shares, curve, replay, every):
+    state = {
+        "replay": [d.isoformat() for d in replay], "every": every, "spy_shares": spy_shares,
+        "prices": prices, "curve": [(d.isoformat(), eq, spy) for d, eq, spy in curve],
+        "variants": {v.name: {
+            "cash": v.account.cash, "unsettled": [(d.isoformat(), u) for d, u in v.account.unsettled],
+            "qty": v.account.qty, "cost": v.account.cost, "spread_paid": v.account.spread_paid,
+            "trades": v.account.trades, "rows": v.rows, "counts": v.counts, "ai_cost": v.ai_cost,
+            "halted": v.g.halted, "halt_reason": v.g.halt_reason, "order_times": v.g._order_times,
+        } for v in variants},
+    }
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state))
+    os.replace(tmp, path)
+
+
+def load_checkpoint(path: Path, variants, prices, replay, every):
+    state = json.loads(path.read_text())
+    if state["replay"] != [d.isoformat() for d in replay] or state["every"] != every:
+        raise SystemExit(f"{path} is from a different run (days or --every differ): "
+                         "use another --out folder or delete it")
+    prices.update(state["prices"])
+    for v in variants:
+        st = state["variants"][v.name]
+        a = v.account
+        a.cash, a.qty, a.cost = st["cash"], st["qty"], st["cost"]
+        a.unsettled = [(date.fromisoformat(d), u) for d, u in st["unsettled"]]
+        a.spread_paid, a.trades = st["spread_paid"], st["trades"]
+        v.rows, v.counts, v.ai_cost = st["rows"], st["counts"], st["ai_cost"]
+        v.g.halted, v.g.halt_reason, v.g._order_times = st["halted"], st["halt_reason"], st["order_times"]
+    curve = [(date.fromisoformat(d), eq, spy) for d, eq, spy in state["curve"]]
+    return state["spy_shares"], curve, {d for d, _, _ in curve}
 
 
 def max_drawdown(values) -> float:

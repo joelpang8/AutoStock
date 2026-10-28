@@ -136,3 +136,29 @@ def test_variants_differ_only_in_the_holding_paragraph():
 def test_max_drawdown():
     assert max_drawdown([300, 330, 297, 310]) == pytest.approx(-10.0)
     assert max_drawdown([300, 301, 302]) == 0.0
+
+
+def test_checkpoint_roundtrip(tmp_path):
+    from backtest import Variant, load_checkpoint, save_checkpoint
+    from guardrails import Guardrails, Limits
+    p, today = {"SPY": 100.0}, {"d": DAY}
+    def variant():
+        a = account(p, today)
+        return Variant("cautious", None, a, Guardrails(a, Limits()))
+    v = variant()
+    v.account.buy("SPY", 20.0)
+    v.account.unsettled.append((DAY + timedelta(days=1), 5.0))
+    v.rows.append({"time": "t", "outcome": "filled"})
+    v.counts["buy"] = 1
+    v.g._order_times = [123.0]
+    replay = [DAY, DAY + timedelta(days=1)]
+    save_checkpoint(tmp_path / "c.json", [v], p, 2.9, [(DAY, {"cautious": 299.9}, 100.0)], replay, 5)
+    w = variant()
+    prices = {}
+    spy, curve, done = load_checkpoint(tmp_path / "c.json", [w], prices, replay, 5)
+    assert spy == 2.9 and done == {DAY} and prices == {"SPY": 100.0}
+    assert w.account.qty == v.account.qty and w.account.cash == v.account.cash
+    assert w.account.unsettled == [(DAY + timedelta(days=1), 5.0)]
+    assert w.rows == v.rows and w.counts["buy"] == 1 and w.g._order_times == [123.0]
+    with pytest.raises(SystemExit):
+        load_checkpoint(tmp_path / "c.json", [variant()], {}, replay, 15)
