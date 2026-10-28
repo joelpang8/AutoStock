@@ -64,7 +64,8 @@ class Snapshot:
         t = self.as_of.astimezone(ET)
         close = self.next_close.astimezone(ET)
         lines = [
-            f"time {t:%Y-%m-%d %H:%M} ET, market open, closes {close:%H:%M} ET",
+            f"time {t:%Y-%m-%d %H:%M} ET, market open, closes {close:%H:%M} ET "
+            f"({_until(self.next_close - self.as_of)} from now)",
             f"equity ${self.equity:.2f}, spendable cash ${self.spendable_cash:.2f}",
         ]
         if self.positions:
@@ -83,6 +84,12 @@ class Snapshot:
         if self.context:
             lines.append(self.context)
         return "\n".join(lines)
+
+
+def _until(d: timedelta) -> str:
+    """'2 h 05 min' / '35 min': stated outright so the model doesn't do clock math."""
+    m = max(0, int(d.total_seconds() // 60))
+    return f"{m // 60} h {m % 60:02d} min" if m >= 60 else f"{m} min"
 
 
 def _pct(x):

@@ -75,7 +75,7 @@ def test_snapshot_happy_path():
 def test_prompt_text_is_compact_and_complete():
     data = FakeData({"SPY": snap(), "QQQ": snap(quote(age_s=999))})
     text = md(data).snapshot(FakeBroker(), ["SPY", "QQQ"]).to_prompt()
-    assert "11:00 ET" in text and "closes 16:00 ET" in text
+    assert "11:00 ET" in text and "closes 16:00 ET (5 h 00 min from now)" in text
     assert "equity $300.00, spendable cash $250.00" in text
     assert "SPY $40.00 (+1.5%)" in text
     assert "\nSPY 100.01 " in text
@@ -116,3 +116,10 @@ def test_missing_ticker_is_excluded():
 def test_all_stale_raises():
     with pytest.raises(StaleDataError):
         md(FakeData({"SPY": snap(quote(age_s=600))})).snapshot(FakeBroker(), ["SPY"])
+
+
+def test_time_to_close_wording():
+    from data import _until
+    assert _until(timedelta(minutes=35)) == "35 min"
+    assert _until(timedelta(hours=2, minutes=5)) == "2 h 05 min"
+    assert _until(timedelta(seconds=-30)) == "0 min"

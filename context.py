@@ -55,6 +55,28 @@ def clean_headline(text: str) -> str:
     return text if len(text) <= HEADLINE_CHARS else text[:HEADLINE_CHARS - 1] + "…"
 
 
+SOON_DAYS = 3
+
+
+def earnings_soon(dates: dict, today: date) -> str:
+    """One plain line naming the reports in the next few days, so the model
+    can't overlook them (it did, reading only the date list)."""
+    soon = []
+    for s, (d, when) in sorted(dates.items(), key=lambda kv: kv[1][0]):
+        days = (d - today).days
+        if not 0 <= days <= SOON_DAYS:
+            continue
+        day = "today" if days == 0 else "tomorrow" if days == 1 else f"in {days} days"
+        timing = {"pre-market": " before the open", "post-market": " after the close"}.get(when, "")
+        if days == 0 and when == "pre-market":
+            timing += " (already out)"
+        soon.append(f"{s} {day}{timing}")
+    if not soon:
+        return f"EARNINGS SOON: none of these stocks reports in the next {SOON_DAYS} days"
+    return (f"EARNINGS SOON (next {SOON_DAYS} days; a report can move the stock sharply either way): "
+            + "; ".join(soon))
+
+
 @dataclass
 class _DailyCache:
     day: date | None = None
@@ -275,6 +297,7 @@ class ContextProvider:
                     else:
                         parts.append(f"{s} none in next 3 months")
                 lines.append("next earnings: " + "; ".join(parts))
+                lines.append(earnings_soon(dates, today))
             except Exception as e:
                 self.problems.append(f"earnings unavailable: {e}")
                 lines.append("earnings dates: unavailable this cycle")
