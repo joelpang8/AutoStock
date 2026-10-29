@@ -199,7 +199,7 @@ class ContextProvider:
     def headlines(self, tickers) -> dict:
         ns = self.news_client.get_news(NewsRequest(
             symbols=",".join(sorted(tickers)), start=self.now() - timedelta(hours=self.news_hours),
-            limit=50, sort="desc"))
+            end=self.now(), limit=50, sort="desc"))
         """[(time, [our tickers], headline)], newest first. Each headline once;
         at most `per_ticker` headlines per ticker."""
         arts = (getattr(ns, "data", None) or {}).get("news", [])

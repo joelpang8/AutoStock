@@ -11,10 +11,12 @@ from dataclasses import dataclass, field
 class Limits:
     equity_floor: float = 200.0       # halt + liquidate if equity falls below this
     max_trade_usd: float = 20.0       # max dollars per single order
-    max_ticker_usd: float = 60.0      # max dollars held in one ticker
+    max_ticker_usd: float = 300.0     # max dollars held in one ticker (owner raised from 60
+                                      # on 2026-10-28 for the QLD trend strategy)
     max_orders_per_hour: int = 12     # safety net on order rate
     allowed_tickers: set = field(default_factory=lambda: {
         "SPY", "QQQ", "VOO", "IWM", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
+        "QLD",   # 2x Nasdaq-100, for the trend strategy (owner approved 2026-10-28)
     })
 
 

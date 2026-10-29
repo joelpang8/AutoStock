@@ -36,7 +36,7 @@ state and choose exactly one action: buy, sell, or hold.
 
 Hard limits enforced by code (orders breaking them are rejected, so don't
 propose them): only the tickers listed in the market table; at most $20 per
-order; at most $60 held in any one ticker; no more than the spendable cash;
+order; at most $300 held in any one ticker; no more than the spendable cash;
 sells only of positions you hold, up to their value. Orders are dollar amounts
 and fill at the current quote, so the spread is a real cost.
 
@@ -178,10 +178,12 @@ def validate(text: str, snap: Snapshot) -> Decision:
 
 
 class Decider:
-    def __init__(self, client, model: str, budget: DailyBudget, effort: str = "low"):
+    def __init__(self, client, model: str, budget: DailyBudget, effort: str = "low",
+                 system: str = SYSTEM_PROMPT):
         if model not in PRICES:
             raise ValueError(f"no price table for {model}; add it before using it")
         self.client, self.model, self.budget, self.effort = client, model, budget, effort
+        self.system = system   # the replay test (backtest.py) compares prompt variants
 
     @classmethod
     def from_env(cls, env=os.environ) -> "Decider":
@@ -203,7 +205,7 @@ class Decider:
             resp = self.client.messages.create(
                 model=self.model,
                 max_tokens=MAX_TOKENS,
-                system=SYSTEM_PROMPT,
+                system=self.system,
                 output_config={"effort": self.effort,
                                "format": {"type": "json_schema", "schema": SCHEMA}},
                 messages=[{"role": "user", "content": prompt}],

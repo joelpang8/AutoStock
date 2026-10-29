@@ -23,7 +23,7 @@ Build a bot that trades US stocks by itself, all the time, using Claude (via the
 Stack: Python, `alpaca-py`, the Anthropic SDK, SQLite, systemd.
 
 ## Existing files
-- `guardrails.py`: floor kill-switch ($200), per-trade cap ($20), per-ticker cap ($60), 12 orders per hour, allowed-ticker list, settled-cash check. Expects a broker object with `equity()`, `settled_cash()`, `position_value(ticker)`, `cancel_all_orders()`, `close_all_positions()`.
+- `guardrails.py`: floor kill-switch ($200), per-trade cap ($20), per-ticker cap ($300, raised from $60 by the owner on 2026-10-28 for the QLD trend strategy), 12 orders per hour, allowed-ticker list (QLD added by the owner the same day), settled-cash check. Expects a broker object with `equity()`, `settled_cash()`, `position_value(ticker)`, `cancel_all_orders()`, `close_all_positions()`.
 - `test_guardrails.py`: tests against a fake broker. Run with `python test_guardrails.py`. They must keep passing.
 
 ## Build order
