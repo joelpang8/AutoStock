@@ -12,3 +12,4 @@ events.jsonl
 *.db-shm
 state.json.imported
 backtest_results/
+strategy_results/
