@@ -21,8 +21,9 @@ assert not g.check_order("SPY", "buy", 25)[0]            # over per-trade cap
 assert not g.check_order("GME", "buy", 10)[0]            # not allowed
 assert not g.check_order("SPY", "short", 10)[0]          # bad side
 assert not g.check_order("SPY", "buy", -5)[0]            # bad amount
-b.held["SPY"] = 55
-assert not g.check_order("SPY", "buy", 10)[0]            # per-ticker cap
+b.held["SPY"] = 295
+assert not g.check_order("SPY", "buy", 10)[0]            # per-ticker cap ($300)
+assert g.check_order("QLD", "buy", 10)[0]                # QLD is allowed
 b._cash = 5
 assert not g.check_order("QQQ", "buy", 10)[0]            # unsettled/no cash
 

@@ -1,8 +1,8 @@
 """QLD trend strategy: the signal, order sizing, the watchdog, and the engine
 running it through the real Guardrails. No network.
 
-The engine tests use Limits(QLD allowed, $300 per ticker): the values the
-strategy needs. guardrails.py itself is only changed by the owner."""
+The engine tests use the limits the strategy needs (QLD allowed, $300 per
+ticker), which are also guardrails.py's defaults since 2026-10-28."""
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as NS
 
@@ -129,7 +129,8 @@ def test_risk_off_in_cash_holds():
 def test_no_qld_quote_holds_and_says_why():
     r = strat().decide(snap(tickers=("QQQ",)))
     assert r.decision.action == "hold" and "no usable quote" in r.decision.reason
-    s = TrendStrategy(FakeBars(), FakeWatchdog(), Limits(), now=lambda: NOW)   # default limits
+    no_qld = Limits(allowed_tickers={"QQQ", "SPY"})
+    s = TrendStrategy(FakeBars(), FakeWatchdog(), no_qld, now=lambda: NOW)
     assert "not in the guardrails' allowed tickers" in s.decide(snap(tickers=("QQQ",))).decision.reason
 
 
@@ -207,8 +208,9 @@ def test_engine_floor_still_liquidates(run):
     assert ev["kind"] == "halt" and r.broker.closed_all == 1 and not r.broker.submitted
 
 
-def test_default_limits_reject_qld(tmp_path):
-    """Until the owner changes guardrails.py, a QLD order can't get through."""
-    b = FakeBroker()
-    ok, why = Guardrails(b).check_order("QLD", "buy", 20.0)
-    assert not ok and "not in allowed universe" in why
+def test_default_limits_fit_the_strategy():
+    """guardrails.py as the owner set it on 2026-10-28: QLD allowed, $300 per ticker,
+    everything else unchanged."""
+    lim = Limits()
+    assert HOLD in lim.allowed_tickers and lim.max_ticker_usd == 300.0
+    assert (lim.equity_floor, lim.max_trade_usd, lim.max_orders_per_hour) == (200.0, 20.0, 12)

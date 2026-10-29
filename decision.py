@@ -36,7 +36,7 @@ state and choose exactly one action: buy, sell, or hold.
 
 Hard limits enforced by code (orders breaking them are rejected, so don't
 propose them): only the tickers listed in the market table; at most $20 per
-order; at most $60 held in any one ticker; no more than the spendable cash;
+order; at most $300 held in any one ticker; no more than the spendable cash;
 sells only of positions you hold, up to their value. Orders are dollar amounts
 and fill at the current quote, so the spread is a real cost.
 

@@ -240,8 +240,8 @@ def test_typo_in_paper_flag_refused():
 def test_guardrails_with_real_broker_class(broker, fc):
     g = Guardrails(broker)
     assert g.check_order("SPY", "buy", 15) == (True, "ok")
-    fc.positions["SPY"] = "50"
-    assert not g.check_order("SPY", "buy", 15)[0]  # per-ticker cap
+    fc.positions["SPY"] = "290"
+    assert not g.check_order("SPY", "buy", 15)[0]  # per-ticker cap ($300)
 
 
 def test_guardrails_floor_breach_liquidates(broker, fc):
