@@ -214,3 +214,8 @@ def test_default_limits_fit_the_strategy():
     lim = Limits()
     assert HOLD in lim.allowed_tickers and lim.max_ticker_usd == 300.0
     assert (lim.equity_floor, lim.max_trade_usd, lim.max_orders_per_hour) == (200.0, 20.0, 12)
+
+
+def test_watchdog_prompt_asks_for_a_short_reason():
+    from trend import WATCHDOG_PROMPT
+    assert "ONE short line, under 150 characters" in WATCHDOG_PROMPT
