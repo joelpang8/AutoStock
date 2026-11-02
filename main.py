@@ -75,19 +75,20 @@ def main():
         log.warning("no HEALTHCHECK_URL: nobody will notice if the bot goes silent")
 
     guardrails = Guardrails(broker)
-    strategy = os.getenv("STRATEGY", "qld_trend")
-    if strategy == "qld_trend":
+    strategy = os.getenv("STRATEGY", "qld_vol_target")
+    if strategy in ("qld_trend", "qld_vol_target"):
         from trend import HOLD, WATCHDOG_PROMPT, TrendStrategy
         if HOLD not in guardrails.limits.allowed_tickers:
-            raise SystemExit(f"STRATEGY=qld_trend needs {HOLD} in the allowed tickers in "
+            raise SystemExit(f"STRATEGY={strategy} needs {HOLD} in the allowed tickers in "
                              "guardrails.py (an owner decision), or set STRATEGY=claude")
         watchdog = Decider.from_env()
         watchdog.system = WATCHDOG_PROMPT
-        decider = TrendStrategy.from_env(watchdog, guardrails.limits)
+        target = float(os.getenv("VOL_TARGET", "0.25")) if strategy == "qld_vol_target" else None
+        decider = TrendStrategy.from_env(watchdog, guardrails.limits, vol_target=target)
     elif strategy == "claude":
         decider = Decider.from_env()
     else:
-        raise SystemExit(f"unknown STRATEGY={strategy!r}: use qld_trend or claude")
+        raise SystemExit(f"unknown STRATEGY={strategy!r}: use qld_vol_target, qld_trend or claude")
     log.info("strategy: %s", strategy)
     engine = Engine(broker, MarketData.from_env(context=ContextProvider.from_env()), decider, guardrails,
                     store, guardrails.limits.allowed_tickers,
