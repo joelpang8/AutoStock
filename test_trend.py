@@ -4,6 +4,9 @@ running it through the real Guardrails. No network.
 The engine tests use the limits the strategy needs (QLD allowed, $300 per
 ticker), which are also guardrails.py's defaults since 2026-10-28."""
 from datetime import datetime, timedelta, timezone
+import math
+import re
+import statistics
 from types import SimpleNamespace as NS
 
 import pytest
@@ -39,7 +42,7 @@ class FakeWatchdog:
         self.budget, self.reply, self.prompts = DailyBudget(1.0), reply, []
     def decide(self, snap):
         self.prompts.append(snap.to_prompt())
-        usd = float(snap.context.split("$")[-1].split(" ")[0])
+        usd = float(re.search(r"PROPOSED ORDER from the rule: \w+ \$([\d.]+)", snap.context).group(1))
         d = {"approve": Decision("buy", HOLD, usd, "data looks normal"),
              "veto": Decision("hold", "NONE", 0.0, "QQQ down 4% today"),
              "change": Decision("buy", HOLD, 5.0, "smaller"),
@@ -219,3 +222,95 @@ def test_default_limits_fit_the_strategy():
 def test_watchdog_prompt_asks_for_a_short_reason():
     from trend import WATCHDOG_PROMPT
     assert "ONE short line, under 150 characters" in WATCHDOG_PROMPT
+
+
+# --- volatility target ---------------------------------------------------------------
+class WigglyBars(FakeBars):
+    """QQQ alternating +1% / -1% each day (20-day vol about 16% a year), trending
+    up overall so it stays above its 200-day average. `this_week` adds a wild
+    move after Monday of NOW's week, which the weekly share must ignore."""
+    def __init__(self, this_week=False):
+        super().__init__()
+        self.this_week = this_week
+    def get_stock_bars(self, req):
+        self.requests.append(req)
+        day0 = NOW.astimezone(ET).replace(hour=0, minute=0) - timedelta(days=260)
+        closes, c = [], 100.0
+        for i in range(259):
+            c *= (1.0102 if i % 2 == 0 else 0.99)
+            closes.append(c)
+        bars = [NS(timestamp=day0 + timedelta(days=i), close=x) for i, x in enumerate(closes)]
+        if self.this_week:   # NOW is Thursday 2026-10-22: Tuesday the 20th is this week
+            bars = [b for b in bars if b.timestamp.astimezone(ET).date() < NOW.astimezone(ET).date()
+                    - timedelta(days=2)]
+            bars.append(NS(timestamp=NOW - timedelta(days=2), close=closes[-1] * 1.2))
+        return NS(data={SIGNAL: bars})
+
+
+def vstrat(reply="approve", **kw):
+    return TrendStrategy(WigglyBars(**kw), FakeWatchdog(reply), LIMITS, vol_target=0.25,
+                         now=lambda: NOW)
+
+
+def qld(usd):
+    return {HOLD: {"usd": usd, "qty": usd / 100, "pl_pct": 0.0}}
+
+
+def test_vol_weight_is_target_over_twice_qqq_vol():
+    s = vstrat()
+    s.signal()
+    w, vol = s._weight
+    rets = [1.0102 - 1 if i % 2 == 0 else 0.99 - 1 for i in range(259)][-20:]
+    assert vol == pytest.approx(statistics.stdev(rets) * math.sqrt(252), rel=0.02)
+    assert w == round(0.25 / (2 * vol), 2)
+
+
+def test_weekly_share_ignores_this_weeks_closes():
+    a, b = vstrat(), vstrat(this_week=True)
+    a.signal(); b.signal()
+    assert a._weight[0] == pytest.approx(b._weight[0], abs=0.01)
+
+
+def test_vol_target_from_cash_buys_toward_target_through_the_watchdog():
+    s = vstrat()
+    r = s.decide(snap(cash=300.0))
+    assert (r.decision.action, r.decision.usd) == ("buy", 20.0)
+    assert f"target {s._weight[0]:.0%} in QLD" in r.decision.reason and s.watchdog.prompts
+
+
+def test_vol_target_trims_a_full_position_without_the_watchdog():
+    s = vstrat()
+    full = snap(cash=0.0, positions=qld(300.0))
+    full = full.__class__(**{**full.__dict__, "equity": 300.0})
+    r = s.decide(full)
+    assert (r.decision.action, r.decision.usd) == ("sell", 20.0)
+    assert "trimming" in r.decision.reason and not s.watchdog.prompts
+
+
+def test_vol_target_keeps_converging_inside_the_band_then_stops():
+    s = vstrat()
+    w = None
+    def at(held):
+        base = snap(cash=300.0 - held, positions=qld(held) if held else {})
+        return base.__class__(**{**base.__dict__, "equity": 300.0})
+    s.decide(at(0.0))                       # far from target: starts converging
+    w = s._weight[0]
+    target = w * 300.0
+    r = s.decide(at(target - 15.0))         # inside the 10% band, but still converging
+    assert r.decision.action == "buy" and r.decision.usd == pytest.approx(15.0, abs=0.01)
+    r = s.decide(at(target - 0.5))          # close enough: done
+    assert r.decision.action == "hold" and "on target" in r.decision.reason
+    r = s.decide(at(target - 15.0))         # drifted, but inside the band: leave it
+    assert r.decision.action == "hold"
+
+
+def test_vol_target_still_sells_everything_when_risk_off():
+    s = TrendStrategy(FakeBars(last=90.0), FakeWatchdog(), LIMITS, vol_target=0.25, now=lambda: NOW)
+    r = s.decide(snap(cash=0.0, positions=qld(50.0)))
+    assert (r.decision.action, r.decision.usd) == ("sell", 20.0)
+
+
+def test_no_vol_target_keeps_the_old_all_in_behaviour():
+    s = TrendStrategy(WigglyBars(), FakeWatchdog(), LIMITS, now=lambda: NOW)
+    r = s.decide(snap(cash=0.0, positions=qld(299.0)))
+    assert r.decision.action == "hold" and "fully invested" in r.decision.reason
